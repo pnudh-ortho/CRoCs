@@ -1,3 +1,3 @@
 ## Model Downloads
 
-The pre-trained models will be made available soon.
+The release of the pre-trained models is currently under internal discussion.
