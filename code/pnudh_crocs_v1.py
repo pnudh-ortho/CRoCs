@@ -2,6 +2,8 @@ import os
 import re
 import sys
 import warnings
+import shutil
+
 from dataclasses import dataclass, field, replace
 from enum import Enum, auto
 from pathlib import Path
@@ -371,7 +373,8 @@ def natural_keys(text: str) -> list:
 def ensure_output_dirs(cfg: Config) -> None:
     cfg.OUTPUT_DIR_CLASSIFICATION.mkdir(parents=True, exist_ok=True)
     cfg.OUTPUT_DIR_CROCS.mkdir(parents=True, exist_ok=True)
-    cfg.OUTPUT_DIR_REFERENCE.mkdir(parents=True, exist_ok=True)
+    if cfg.has_reference:
+        cfg.OUTPUT_DIR_REFERENCE.mkdir(parents=True, exist_ok=True)
 
 def get_file_list_by_class(directory: Path, class_name: str) -> List[Path]:
     if not directory.exists():
@@ -862,6 +865,18 @@ class MainGUI:
                 new_name = instance.save_image(self.config)
                 print(f"Saved: {new_name}")
         print(f"📁 Crocs output: {self.config.OUTPUT_DIR_CROCS}")
+
+        if self.config.OUTPUT_DIR_CLASSIFICATION.exists():
+            try:
+                shutil.rmtree(self.config.OUTPUT_DIR_CLASSIFICATION)
+            except Exception as e:
+                print(f"⚠️ Failed to delete classification directory: {e}")
+
+        if self.config.has_reference and self.config.OUTPUT_DIR_REFERENCE.exists():
+            try:
+                shutil.rmtree(self.config.OUTPUT_DIR_REFERENCE)
+            except Exception as e:
+                print(f"⚠️ Failed to delete reference directory: {e}")
 
     def run(self):
         plt.show()

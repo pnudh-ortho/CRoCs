@@ -13,15 +13,6 @@ by Hyeonsik Roh\*, Hyeonjin Jo\*, and Yongil Kim<sup>+</sup>
 
 ## Prerequisites
 
-Before you begin, ensure you have the following installed:
-
-  * **Git:** You can download it from the [official website](https://git-scm.com/downloads).
-  * **Miniconda (for Windows):** A minimal installer for Conda.
-
------
-
-## Installation
-
 1.  **Download and Install Miniconda**
 
     You have two options for downloading Miniconda.
