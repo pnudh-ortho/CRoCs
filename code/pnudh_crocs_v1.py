@@ -902,6 +902,11 @@ def load_data_and_predict_initials(config: Config, progress_cb=None) -> AppState
             instance = ImageInstance.from_file(file_path, config)
             if instance:
                 angle = rotation_predictor.predict_angle(instance)
+
+                # TODO: NEED TO FIX (If the image category is 'face', force the angle to be 0.0)
+                if instance.category == 'face':
+                    angle = 0.0
+                    
                 instance.initial_angle = instance.rotation_angle = angle
                 cx, cy, w, h = crop_predictor.predict_box(instance)
                 target_ratio = (3.0/4.0) if instance.category == 'face' else (4.0/3.0)
