@@ -70,11 +70,11 @@ class Config:
     CROP_MODEL_DIR: Path = Path(".")
     CROP_MODEL_PREFIX: str = "code/models/WideResnet50_cropping_"
     CROP_IMG_SIZE: int = 224
-    CROP_MOVE_RATIO: float = 0.05
-    CROP_ZOOM_RATIO: float = 0.05
+    CROP_MOVE_RATIO: float = 0.025
+    CROP_ZOOM_RATIO: float = 0.025
 
     # Thumbnail settings
-    THUMBNAIL_SIZE: Tuple[int, int] = (600, 400)
+    THUMBNAIL_SIZE: Tuple[int, int] = (800, 600)
 
     @property
     def OUTPUT_DIR_CLASSIFICATION(self) -> Path: return self._derive_output_path(self.SUFFIX_CLASSIFICATION)
@@ -163,6 +163,19 @@ class ImageInstance:
     
     def get_rotated_thumbnail(self) -> Image.Image:
         return self.thumbnail_data.rotate(self.rotation_angle, resample=Image.BICUBIC, fillcolor='white')
+    
+    # Version 2
+    def get_cropped_thumbnail(self) -> Image.Image:
+        rotated_thumb = self.get_rotated_thumbnail()
+        
+        w, h = rotated_thumb.size
+        box = self.crop_box
+        left = (box.cx - box.w / 2) * w
+        top = (box.cy - box.h / 2) * h
+        right = (box.cx + box.w / 2) * w
+        bottom = (box.cy + box.h / 2) * h
+
+        return rotated_thumb.crop((left, top, right, bottom))
 
     def get_final_image(self) -> Image.Image:
         rotated_image = self.image_data.rotate(self.rotation_angle, resample=Image.BICUBIC, fillcolor='white')
@@ -243,10 +256,15 @@ class ImageClassifier:
 
         for i, image_path in enumerate(image_files, 1):
             img = Image.open(image_path).convert("RGB")
+
             predicted_class = self._classify_single_image(img)
 
-            if predicted_class in ['upper', 'lower']:
+            if predicted_class in ['upper', 'lower'] and phase_name == "Classification":
                 img = ImageOps.flip(img)
+
+            # Version 2
+            if predicted_class in ['upper', 'lower'] and phase_name == "Reference Classification":
+                predicted_class = "upper" if predicted_class == "lower" else "lower"
 
             class_counts[predicted_class] += 1
             new_filename = f"{self.config.PATIENT_NUM}_{predicted_class}_{class_counts[predicted_class]}{image_path.suffix.lower()}"
@@ -764,8 +782,8 @@ class MainGUI:
             ax.set_visible(i in (0, 1))
 
         if not getattr(self, "_ref_layout_active", False):
-            axes[0].set_position([0.25, 0.35, 0.20, 0.30])
-            axes[1].set_position([0.55, 0.35, 0.20, 0.30])
+            axes[0].set_position([0.08, 0.15, 0.40, 0.60])
+            axes[1].set_position([0.52, 0.15, 0.40, 0.60])
             self._ref_layout_active = True
 
         left_ax, right_ax = axes[0], axes[1]
@@ -774,11 +792,11 @@ class MainGUI:
         ref_list = self.state.ref_image_data.get(class_name, [])
         ref_total, ref_idx = len(ref_list), self.state.ref_current_indices.get(class_name, 0)
         if ref_total == 0:
-            self._draw_placeholder(left_ax, f"{class_name} [Ref 0/0]")
+            self._draw_placeholder(left_ax, f"{class_name} [Reference 0/0]")
         else:
             ref_instance = ref_list[ref_idx]
             left_ax.imshow(ref_instance.get_rotated_thumbnail())
-            left_ax.set_title(f"{class_name} [Ref {ref_idx + 1}/{ref_total}]", fontsize=10)
+            left_ax.set_title(f"{class_name} [Reference {ref_idx + 1}/{ref_total}]", fontsize=10)
         self._apply_styles(left_ax, self.state.selected_class_idx)
 
         main_list = self.state.image_data.get(class_name, [])
@@ -787,13 +805,18 @@ class MainGUI:
             self._draw_placeholder(right_ax, f"{class_name} [Main 0/0]")
         else:
             main_instance = main_list[main_idx]
-            thumb = main_instance.get_rotated_thumbnail()
-            right_ax.imshow(thumb)
-            right_ax.set_title(f"{class_name} [Main {main_idx + 1}/{main_total}]  Angle: {main_instance.rotation_angle:+.1f}°", fontsize=10)
-            
+
             if self._ref_edit_mode == AppMode.CROP:
-                self._draw_crop_box(right_ax, main_instance.crop_box, thumb.size)
-                
+                display_image = main_instance.get_cropped_thumbnail()
+                right_ax.imshow(display_image)
+                box = main_instance.crop_box
+                right_ax.set_title(f"{class_name} [Main {main_idx + 1}/{main_total}] | Angle: {main_instance.rotation_angle:+.1f} | Crop W:{box.w:.2f} H:{box.h:.2f}", fontsize=10)
+            else:
+                display_image = main_instance.get_rotated_thumbnail()
+                right_ax.imshow(display_image)
+                right_ax.set_title(f"{class_name} [Main {main_idx + 1}/{main_total}] | Angle: {main_instance.rotation_angle:+.1f}°", fontsize=10)
+                self._draw_crop_box(right_ax, main_instance.crop_box, display_image.size)
+
         self._apply_styles(right_ax, self.state.selected_class_idx)
         self.fig.canvas.draw_idle()
 
@@ -891,7 +914,6 @@ def load_data_and_predict_initials(config: Config, progress_cb=None) -> AppState
     image_data: Dict[str, List[ImageInstance]] = {name: [] for name in config.CLASS_NAMES}
     ref_image_data: Dict[str, List[ImageInstance]] = {name: [] for name in config.CLASS_NAMES}
 
-    # Main 폴더 데이터
     all_lists = {name: get_file_list_by_class(config.OUTPUT_DIR_CLASSIFICATION, name) for name in config.CLASS_NAMES}
     total = sum(len(v) for v in all_lists.values())
     done = 0
@@ -902,11 +924,6 @@ def load_data_and_predict_initials(config: Config, progress_cb=None) -> AppState
             instance = ImageInstance.from_file(file_path, config)
             if instance:
                 angle = rotation_predictor.predict_angle(instance)
-
-                # TODO: NEED TO FIX (If the image category is 'face', force the angle to be 0.0)
-                if instance.category == 'face':
-                    angle = 0.0
-                    
                 instance.initial_angle = instance.rotation_angle = angle
                 cx, cy, w, h = crop_predictor.predict_box(instance)
                 target_ratio = (3.0/4.0) if instance.category == 'face' else (4.0/3.0)
